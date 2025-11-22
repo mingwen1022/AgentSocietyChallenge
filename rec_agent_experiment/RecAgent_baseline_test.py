@@ -54,6 +54,36 @@ def test_llm():
     print(result)
 
 
+def load_first_task(dataset="goodreads"):
+    """
+    dataset: 'goodreads' or 'amazon' or 'yelp'
+    Returns: the parsed task dict
+    """
+
+    base_path = f"./example/track2/{dataset}/tasks"
+
+    # 找到所有 task_*.json
+    task_files = sorted(
+        [
+            f
+            for f in os.listdir(base_path)
+            if f.startswith("task_") and f.endswith(".json")
+        ]
+    )
+
+    if not task_files:
+        raise FileNotFoundError(f"No task files found in {base_path}")
+
+    # 默认读取第一个文件 (task_0.json)
+    first_file = os.path.join(base_path, task_files[0])
+    print(f"Loading task file: {first_file}")
+
+    with open(first_file, "r", encoding="utf-8") as f:
+        task = json.load(f)
+
+    return task
+
+
 def test_planning_module():
     api_key_gemini = GEMINI_KEY
     api_key_openai = OPENAI_API_KEY
@@ -64,34 +94,35 @@ def test_planning_module():
 
     print("\n===== TEST: Planning Module (Recommendation Voyager) =====\n")
 
-    test_task = {
-        "type": "recommendation",
-        "user_id": "ztgVL0NPadoUwCO9MWeUUQ",
-        "candidate_category": "business - Shopping",
-        "candidate_list": [
-            "OjFr_sk32NOhYSvA_Ucd5Q",
-            "PdBwl7tlFhOBR3p4kMd9Hw",
-            "FbY5HjT_nCqfB8PiXX-fcQ",
-            "oFu61fiwKh6W_zgGjATfyw",
-            "QOUqT4PuH2Xm-ky0R87JNg",
-            "BrO4rhvgGU2vXx4cvVJIpg",
-            "uFs6biPJw2FlVY3taR4QNQ",
-            "pRYs_U3tiTisUazOzDgLaA",
-            "qF1NTfE0yfbTc1kb2mX1FA",
-            "0d7nPS5dv42stQqdZbh08g",
-            "WNFxt2TyMDEuNNNZ9Z9zRQ",
-            "g-cQ3TeR7lcY_TObcDkw6w",
-            "IaelRCI4Ah5oxiHuBnFC7w",
-            "9kfDDNapNWKF5B41X27HkA",
-            "4hmaKbOARJsP_8UfRssQJg",
-            "ClIkpkKO-Es8MHlsfDOKMQ",
-            "OQqBFuA5tcxdHog8YgMRcQ",
-            "ZVrOGpZe5usRbdxxtmxHoQ",
-            "o2oD8bGW3oMaaTeSOqi-Kg",
-            "BzDbphyIfHWZUoaQQdAUYw",
-        ],
-        "loc": [4621600.795281307, 5685269.728156481],
-    }
+    # test_task = {
+    #     "type": "recommendation",
+    #     "user_id": "ztgVL0NPadoUwCO9MWeUUQ",
+    #     "candidate_category": "business - Shopping",
+    #     "candidate_list": [
+    #         "OjFr_sk32NOhYSvA_Ucd5Q",
+    #         "PdBwl7tlFhOBR3p4kMd9Hw",
+    #         "FbY5HjT_nCqfB8PiXX-fcQ",
+    #         "oFu61fiwKh6W_zgGjATfyw",
+    #         "QOUqT4PuH2Xm-ky0R87JNg",
+    #         "BrO4rhvgGU2vXx4cvVJIpg",
+    #         "uFs6biPJw2FlVY3taR4QNQ",
+    #         "pRYs_U3tiTisUazOzDgLaA",
+    #         "qF1NTfE0yfbTc1kb2mX1FA",
+    #         "0d7nPS5dv42stQqdZbh08g",
+    #         "WNFxt2TyMDEuNNNZ9Z9zRQ",
+    #         "g-cQ3TeR7lcY_TObcDkw6w",
+    #         "IaelRCI4Ah5oxiHuBnFC7w",
+    #         "9kfDDNapNWKF5B41X27HkA",
+    #         "4hmaKbOARJsP_8UfRssQJg",
+    #         "ClIkpkKO-Es8MHlsfDOKMQ",
+    #         "OQqBFuA5tcxdHog8YgMRcQ",
+    #         "ZVrOGpZe5usRbdxxtmxHoQ",
+    #         "o2oD8bGW3oMaaTeSOqi-Kg",
+    #         "BzDbphyIfHWZUoaQQdAUYw",
+    #     ],
+    #     "loc": [4621600.795281307, 5685269.728156481],
+    # }
+    test_task = load_first_task(dataset="goodreads")
 
     # test_task_safe = {
     #     "type": "recommendation",

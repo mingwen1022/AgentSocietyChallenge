@@ -9,7 +9,8 @@ import re
 import ast
 from websocietysimulator.agent.modules.planning_modules import PlanningBase
 
-FIELD_GUIDE = """
+# yelp
+yelp_guides = """
 You are solving a RECOMMENDATION planning task.
 
 Input task fields (Yelp):
@@ -64,12 +65,81 @@ review dataset — one row per review:
 
 Your goal:
 1. Generate subgoals that retrieve necessary information from 
-   user_yelp, item_yelp, and review_yelp.
+   user, item, and review.
 2. Ensure subgoals enable a reasoning module to later rank 
    the candidate_list from most relevant to least relevant for the user.
 3. Keep subgoals high-level, concise, and logically ordered.
 4. For each subgoal, output both "description" and "reasoning instruction".
 """
+
+good_reads_guides = """
+You are solving a RECOMMENDATION planning task.
+
+Input task fields (Goodreads):
+- type: it's fixed as "recommendation"
+- user_id: appears in user and review datasets
+- candidate_list: list of item_id (books) that appear in item and review datasets
+- candidate_category: high-level genre/category of candidate books
+- loc: (latitude, longitude) — usually unused for Goodreads but remains for interface consistency
+
+Relevant datasets (Goodreads):
+
+user dataset — one row per user:
+- user_id: unique user identifier; links to review.user_id
+- source: fixed as 'goodreads'
+(Users often contain minimal metadata; profile fields may not be available.)
+
+item dataset — one row per book:
+- item_id: unique book identifier; links to review.item_id
+- title: book title
+- title_without_series: cleaned title without series annotation
+- average_rating: aggregated community rating
+- ratings_count: total number of ratings received
+- text_reviews_count: total number of textual reviews
+- description: book summary or synopsis
+- authors: list of authors with author_id and role
+- publisher: publishing company
+- num_pages: number of pages
+- publication_year / month / day: publication date metadata
+- isbn / isbn13: book identifiers
+- asin / kindle_asin: Amazon identifiers if available
+- format: book format (paperback, ebook, etc.)
+- is_ebook: boolean flag
+- popular_shelves: list of user-defined shelves with counts 
+    (e.g., to-read, currently-reading, favorites)
+- similar_books: list of related/recommended book ids
+- country_code: country metadata
+- language_code: language of the book
+- link / url: Goodreads detail page links
+- image_url: cover image URL
+- work_id: Goodreads work identifier
+- source: fixed as 'goodreads'
+- type: object type, usually "book"
+
+review dataset — one row per review:
+- review_id: unique review identifier
+- user_id: reviewer id; links to user.user_id
+- item_id: reviewed book id; links to item.item_id
+- stars: star rating (float)
+- text: textual review content (very important for preference extraction)
+- date_added / date_updated: timestamps of review creation & update
+- read_at: when the user marked the book as read (may be empty)
+- started_at: reading start time (may be empty)
+- n_votes: number of likes/upvotes the review received
+- n_comments: number of comments on the review
+- source: fixed as 'goodreads'
+- type: usually 'book'
+
+Your goal:
+1. Generate subgoals that retrieve necessary information from 
+   user, item, and review datasets.
+2. Ensure subgoals enable a reasoning module to later rank 
+   the candidate_list from most relevant to least relevant for the user.
+3. Keep subgoals high-level, concise, and logically ordered.
+4. For each subgoal, output both "description" and "reasoning instruction".
+"""
+
+FIELD_GUIDE = good_reads_guides
 
 OUTPUT_STYLE_GUIDE = """
 You must output a list of subgoals in the following style:
