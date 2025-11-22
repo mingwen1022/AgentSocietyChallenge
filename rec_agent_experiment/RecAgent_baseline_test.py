@@ -14,7 +14,7 @@ import re
 import logging
 import time
 from dotenv import load_dotenv
-from planning_module_custom import PlanningRecommendationVoyager
+from planning_module_custom import *
 
 load_dotenv()
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
@@ -107,14 +107,17 @@ def test_planning_module():
     # create planner,
     # feedback: for planning validation(validate whether the output is in correct structure or contain required elements. Not yet implemented)
     # few_shot: param for long-term memory(successful examples)
-    planner = PlanningRecommendationVoyager(llm_google)
+    planner = PlanningIOCustom(llm_google)
     plan = planner(
         task_type="Recommendation Task",
         task_description=task_description,
         feedback="",
         few_shot="",
     )
-    print(plan)
+    for step in plan:
+        print(f"Step: {step['description']}")
+        print(f"Reasoning Instruction: {step['reasoning instruction']}")
+        print("----")
 
 
 if __name__ == "__main__":
