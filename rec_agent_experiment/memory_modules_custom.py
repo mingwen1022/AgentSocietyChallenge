@@ -7,7 +7,7 @@ import uuid
 
 
 class MemoryBase:
-    def __init__(self, memory_type: str, llm) -> None:
+    def __init__(self, memory_type: str, llm, reset: bool = False) -> None:
         """
         Initialize the memory base class
 
@@ -20,10 +20,18 @@ class MemoryBase:
         # db_path = os.path.join('./db', memory_type, f'{str(uuid.uuid4())}')
         # store memory in one file so they can be accessed and shared across different tasks
         db_path = os.path.join("./db", memory_type)
-        if os.path.exists(db_path):
+        # if os.path.exists(db_path):
+        #     shutil.rmtree(db_path)
+        # self.scenario_memory = Chroma(
+        #     embedding_function=self.embedding, persist_directory=db_path
+        # )
+
+        if reset and os.path.exists(db_path):
             shutil.rmtree(db_path)
+
         self.scenario_memory = Chroma(
-            embedding_function=self.embedding, persist_directory=db_path
+            embedding_function=self.embedding,
+            persist_directory=db_path,
         )
 
     def __call__(self, current_situation: str = ""):
@@ -40,8 +48,8 @@ class MemoryBase:
 
 
 class MemoryDILU(MemoryBase):
-    def __init__(self, llm):
-        super().__init__(memory_type="dilu", llm=llm)
+    def __init__(self, llm, reset: bool = False):
+        super().__init__(memory_type="dilu", llm=llm, reset=reset)
 
     def retriveMemory(self, query_scenario: str):
         # Extract task name from query scenario
@@ -79,8 +87,8 @@ class MemoryDILU(MemoryBase):
 
 
 class MemoryGenerative(MemoryBase):
-    def __init__(self, llm):
-        super().__init__(memory_type="generative", llm=llm)
+    def __init__(self, llm, reset: bool = False):
+        super().__init__(memory_type="generative", llm=llm, reset=reset)
 
     def retriveMemory(self, query_scenario: str):
         # Extract task name from query
@@ -144,8 +152,8 @@ Score: """
 
 
 class MemoryTP(MemoryBase):
-    def __init__(self, llm):
-        super().__init__(memory_type="tp", llm=llm)
+    def __init__(self, llm, reset: bool = False):
+        super().__init__(memory_type="tp", llm=llm, reset=reset)
 
     def retriveMemory(self, query_scenario: str):
         # Extract task name from scenario
@@ -192,9 +200,11 @@ Plan:
         self.scenario_memory.add_documents([memory_doc])
 
 
-class MemoryVoyager(MemoryBase):
-    def __init__(self, llm):
-        super().__init__(memory_type="voyager", llm=llm)
+class MemoryVoyager(
+    MemoryBase,
+):
+    def __init__(self, llm, reset: bool = False):
+        super().__init__(memory_type="voyager", llm=llm, reset=reset)
 
     def retriveMemory(self, query_scenario: str):
         # Extract task name from query

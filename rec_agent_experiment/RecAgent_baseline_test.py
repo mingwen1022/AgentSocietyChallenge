@@ -121,7 +121,7 @@ class TestRecommendationAgent(RecommendationAgent):
     def __init__(self, llm: LLMBase, dataset: str = "goodreads"):
         super().__init__(llm=llm)
         self.dataset = dataset
-        self.planning = PlanningIOCustom(llm=self.llm)
+        self.planning = PlanningVoyagerCustom(llm=self.llm)
         self.memory = MemoryDILU(llm=self.llm)
 
     def workflow(self):

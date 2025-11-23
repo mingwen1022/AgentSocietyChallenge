@@ -1,4 +1,5 @@
-# Recommended to save as rec_agent_experiment/track2_full_test.py
+# rec_agent_experiment/RecAgent_baseline_test_train.py
+# Offline trainer for long-term memory (MemoryDILU)
 
 import sys
 import os
@@ -15,7 +16,7 @@ from websocietysimulator.llm import LLMBase
 from gemini import GeminiLLM
 
 from planning_module_custom import PlanningIOCustom
-from memory_modules_custom import MemoryDILU
+from memory_modules_custom import *
 
 # ====== Environment and logging ======
 
@@ -29,7 +30,7 @@ if not GOOGLE_API_KEY:
 logging.basicConfig(level=logging.INFO)
 
 
-# ====== Data loading: store tasks and groundtruth in two aligned lists ======
+# ====== Data loading: tasks and groundtruth in two aligned lists ======
 
 
 def load_tasks_and_groundtruth(
@@ -70,7 +71,7 @@ def load_tasks_and_groundtruth(
             )
             continue
 
-        # load task file (keep as raw dict here; no SimulationTask/RecommendationTask wrapping)
+        # load task file (raw dict; no SimulationTask/RecommendationTask wrapping)
         task_path = os.path.join(tasks_dir, task_file)
         with open(task_path, "r", encoding="utf-8") as f:
             task_data = json.load(f)
@@ -82,23 +83,32 @@ def load_tasks_and_groundtruth(
         tasks.append(task_data)
         groundtruth_data.append(gt_data)
 
-    logging.info(f"Loaded {len(tasks)} task-groundtruth pairs (local test loader)")
+    logging.info(f"Loaded {len(tasks)} task-groundtruth pairs (local train loader)")
     return tasks, groundtruth_data
 
 
-# ====== Test Agent: only planning + memory, reasoning/tooluse mocked ======
+# ====== Training Agent: planning + memory; reasoning/tooluse mocked ======
 
 
-class Track2TestAgent(RecommendationAgent):
+class Track2TrainAgent(RecommendationAgent):
     """
-    Agent used only for local testing of planning + memory, without Simulator.
+    Agent used only for offline training of long-term memory.
+    It:
+      - uses PlanningIOCustom to produce a plan,
+      - simulates reasoning & tooluse,
+      - evaluates against groundtruth,
+      - writes only successful trajectories into MemoryDILU.
     """
 
     def __init__(self, llm: LLMBase, dataset: str = "goodreads"):
         super().__init__(llm=llm)
         self.dataset = dataset
         self.planning = PlanningIOCustom(llm=self.llm)
-        self.memory = MemoryDILU(llm=self.llm)
+        # Training phase: create a fresh MemoryDILU instance.
+        self.memory_dilu = MemoryDILU(llm, reset=True)
+        self.memory_gen = MemoryGenerative(llm, reset=True)
+        self.memory_tp = MemoryTP(llm, reset=True)
+        self.memory_voyager = MemoryVoyager(llm, reset=True)
 
     def workflow(self, task: dict, groundtruth_item_id: str):
         """
@@ -106,25 +116,22 @@ class Track2TestAgent(RecommendationAgent):
         - call planning
         - simulate reasoning & tooluse
         - evaluate whether groundtruth is in the top-3
-        - write trajectory into memory
+        - write trajectory into memory ONLY if correct
         """
-        print("\n===== TEST: Planning + Memory (single task) =====\n")
+        print("\n===== TRAIN: Planning + Memory (single task) =====\n")
 
         # 1) Build task description
         task_description = json.dumps(task, indent=2)
 
-        # 2) Retrieve few-shot examples from memory (if any)
-        # Extract pure task info
-        task_info = (
-            f"user={self.task['user_id']}, category={self.task['candidate_category']}"
-        )
+        # 2) Build a compact key from user & category (for logging only here)
+        user_id = task.get("user_id", "")
+        category = task.get("candidate_category", "")
+        task_info = f"user={user_id}, category={category}"
 
-        # Retrieve longterm memory
+        # 3) No few-shot during training (for simplicity and stability)
         few_shot = ""
-        if self.memory is not None:
-            few_shot = self.memory("Task: " + task_info) or ""
 
-        # 3) Call planner
+        # 4) Call planner
         plan = self.planning(
             task_type="Recommendation Task",
             task_description=task_description,
@@ -137,12 +144,12 @@ class Track2TestAgent(RecommendationAgent):
             print(f"    Reasoning Instruction: {step['reasoning instruction']}")
         print("----")
 
-        # 4) Simulate reasoning & tooluse (only ensure structure is valid here)
+        # 5) Simulate reasoning & tooluse (only ensure structure is valid here)
         tooluse_result = "example_tooluse: simulated tool use (fetch user/item/review)"
         # Here we directly use candidate_list as the "predicted ranking result"
         reasoning_result = list(task["candidate_list"])
 
-        # 5) Do a simple top-3 evaluation against groundtruth
+        # 6) Simple top-3 evaluation against groundtruth
         top3 = reasoning_result[:3]
         is_correct = groundtruth_item_id in top3
 
@@ -151,24 +158,36 @@ class Track2TestAgent(RecommendationAgent):
         print("  Pred top-3:", top3)
         print("  Correct@3:", is_correct)
 
-        # 6) Write into Memory (trajectory records the key information)
+        # 7) Build trajectory
         trajectory = (
             f"Task:\n"
             f"    {task_description}\n\n"
+            f"Task Info:\n"
+            f"    {task_info}\n\n"
+            f"Ground truth:\n"
+            f"    {groundtruth_item_id}\n\n"
+            f"Is Correct:\n"
+            f"    {is_correct}\n\n"
             f"Plan:\n"
             f"    {plan}\n\n"
             f"Reasoning:\n"
             f"    {reasoning_result}\n\n"
             f"ToolUse:\n"
-            f"    {tooluse_result}\n\n"
-            f"Is Correct:\n"
-            f"    {is_correct}\n"
+            f"    {tooluse_result}\n"
         )
 
-        print("\n[Trajectory to Memory]:", trajectory)
-        self.memory("review: " + trajectory)
-        print("[Memory Added]\n")
+        # 8) Only store successful trajectories into memory
+        if is_correct:
+            print("\n[Trajectory to Memory]:", trajectory)
+            self.memory_dilu("review: " + trajectory)
+            self.memory_gen("review: " + trajectory)
+            self.memory_tp("review: " + trajectory)
+            self.memory_voyager("review: " + trajectory)
+            print("[Memory Added]\n")
+        else:
+            print("\n[Trajectory NOT added to Memory] (incorrect prediction)\n")
 
+        # Return all info for logging
         return {
             "few_shot": few_shot,
             "task": task,
@@ -180,16 +199,18 @@ class Track2TestAgent(RecommendationAgent):
         }
 
 
-# ====== Main entry: iterate over all tasks in track2_test ======
+# ====== Main entry: iterate over all tasks in track2_test and train memory ======
 
 if __name__ == "__main__":
-    print("\n===== Track2 Test: multi-task loop over track2_test =====\n")
+    print(
+        "\n===== Track2 Train: multi-task loop over track2_test (build long-term memory) =====\n"
+    )
 
     # 1) Prepare LLM (use Google Gemini)
     llm_google = GeminiLLM(api_key=GOOGLE_API_KEY, model="gemini-2.5-flash")
 
-    # 2) Initialize test Agent (one Agent runs multiple tasks, memory persists across them)
-    agent = Track2TestAgent(llm_google, dataset="goodreads")
+    # 2) Initialize training Agent (one Agent runs multiple tasks, memory persists across them)
+    agent = Track2TrainAgent(llm_google, dataset="goodreads")
 
     # 3) Load tasks and groundtruth in two aligned lists (same style as Simulator)
     tasks, groundtruth_data = load_tasks_and_groundtruth(
@@ -203,12 +224,12 @@ if __name__ == "__main__":
     for idx, (task, gt_dict) in enumerate(zip(tasks, groundtruth_data)):
         gt_item = gt_dict.get("ground truth")
 
-        print(f"\n========== Running Task {idx} ==========")
+        print(f"\n========== Training on Task {idx} ==========")
         print("Task user_id:", task.get("user_id"))
         print("Candidate count:", len(task.get("candidate_list", [])))
         print("Ground truth:", gt_item)
 
-        # workflow should return a dict with all needed fields
+        # workflow returns a dict with all fields
         run_info = agent.workflow(task, gt_item)
 
         if run_info["is_correct"]:
@@ -230,11 +251,12 @@ if __name__ == "__main__":
     summary = {"total": total, "correct_at_3": correct_cnt}
     output = {"summary": summary, "runs": run_logs}
 
-    out_path = "track2_test_detailed_runs.json"
+    out_path = "memory_train_runs.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2, ensure_ascii=False)
 
-    print(f"\n===== Summary =====")
+    print(f"\n===== Training Summary =====")
     print(f"Total tasks: {total}")
     print(f"Correct@3: {correct_cnt}/{total}")
-    print(f"Detailed run log saved to: {out_path}")
+    print(f"Training run log saved to: {out_path}")
+    print("Long-term memory stored under ./db/dilu (to be reused in Simulator).")
