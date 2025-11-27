@@ -52,7 +52,7 @@ class GeminiLLM(LLMBase):
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.0,
-        max_tokens: int = 5000,
+        max_tokens: int = 10000,
         stop_strs: Optional[List[str]] = None,
         n: int = 1,
     ) -> Union[str, List[str]]:
