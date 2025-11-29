@@ -142,9 +142,15 @@ Your goal:
 FIELD_GUIDE = good_reads_guides
 
 OUTPUT_STYLE_GUIDE = """
-You must output a list of subgoals in the following style:
-sub-task 1: {"description": "...", "reasoning instruction": "..."}
-sub-task 2: {"description": "...", "reasoning instruction": "..."}
+- Output ONLY lines of the form:
+  sub-task k: {"description": "...", "reasoning instruction": "..."}
+- Inside { }, use valid Python dict syntax:
+  - keys must be exactly "description" and "reasoning instruction"
+  - keys and values must be double-quoted
+  - no trailing commas, no comments
+- Do NOT use any braces { } or quotes " inside the values; keep them as plain text.
+- Put EACH sub-task on a single line (no line breaks inside the {...} part).
+- Do NOT output any extra text before or after the list of sub-tasks.
 """
 
 

@@ -52,7 +52,7 @@ class GeminiLLM(LLMBase):
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.0,
-        max_tokens: int = 10000,
+        max_tokens: int = 60000,
         stop_strs: Optional[List[str]] = None,
         n: int = 1,
     ) -> Union[str, List[str]]:
@@ -115,7 +115,9 @@ class GeminiLLM(LLMBase):
                 # ---------------------------
                 # SAFETY / ERROR HANDLING
                 # ---------------------------
-                if finish_reason not in (0, 1):
+                # Treat MAX_TOKENS as truncation (usable partial output),
+                # but keep SAFETY / RECITATION / OTHER as hard errors.
+                if finish_reason not in (0, 1, 2):
                     reason_name = finish_reason_map.get(finish_reason, "UNKNOWN")
                     logger.error(
                         "Gemini blocked output (finish_reason=%s [%s]). "
@@ -125,20 +127,33 @@ class GeminiLLM(LLMBase):
                     )
                     responses.append(f"[ERROR: finish_reason={finish_reason}]")
                     continue
+                elif finish_reason == 2:
+                    reason_name = finish_reason_map.get(finish_reason, "UNKNOWN")
+                    logger.warning(
+                        "Gemini output truncated by max tokens "
+                        "(finish_reason=%s [%s]); using partial content.",
+                        finish_reason,
+                        reason_name,
+                    )
 
-                if not candidate.content or len(candidate.content.parts) == 0:
-                    logger.error("Gemini: Empty content parts.")
+                # If there are no structured parts, we cannot safely access response.text;
+                # treat as empty content and move on.
+                content_parts = getattr(
+                    getattr(candidate, "content", None), "parts", None
+                )
+                if not content_parts:
+                    logger.error(
+                        "Gemini: Empty content parts (no valid Part in candidate)."
+                    )
                     responses.append("[ERROR: empty content]")
                     continue
 
                 # ---------------------------
                 # Extract actual text from parts
                 # ---------------------------
-                parts = candidate.content.parts
                 text_out = ""
-
-                for p in parts:
-                    if hasattr(p, "text"):
+                for p in content_parts:
+                    if hasattr(p, "text") and isinstance(p.text, str):
                         text_out += p.text
 
                 if text_out.strip() == "":

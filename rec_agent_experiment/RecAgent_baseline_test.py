@@ -1,4 +1,5 @@
 import sys, os
+import random
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT)
@@ -15,6 +16,7 @@ from websocietysimulator.agent.modules.reasoning_modules import (
 from websocietysimulator.agent.modules.info_orchestrator_module import InfoOrchestrator
 from websocietysimulator.agent.modules.schemafitter_module import SchemaFitterIO
 from websocietysimulator.tools.interaction_tool import InteractionTool
+from websocietysimulator.agent.modules.pairwise_modules import PairwiseRanker
 from gemini import GeminiLLM
 import re
 import logging
@@ -146,15 +148,22 @@ class TestRecommendationAgent(RecommendationAgent):
             max_candidates_to_profile=None,
         )
         self._schema_fitter_llm = self.llm
+        # Pairwise reranker on top-K items
+        self.pairwise_ranker = PairwiseRanker(self.llm)
+        # store last run summary (for multi-task experiments)
+        self.last_result_summary = None
 
-    def workflow(self):
+    def workflow(self, test_task=None, groundtruth_item=None, task_name=None):
 
         print("\n===== TEST: Planning Module (Recommendation Voyager) =====\n")
-        # load task and groundtruth from example/track2/{dataset}
-        test_task = load_first_task(dataset=self.dataset)
+        # load task and groundtruth from example/track2/{dataset} if not provided
+        if test_task is None:
+            test_task = load_first_task(dataset=self.dataset)
+        if groundtruth_item is None:
+            gt = load_first_groundtruth(dataset=self.dataset)
+            groundtruth_item = gt.get("ground truth")
+
         task_description = json.dumps(test_task, indent=2)
-        gt = load_first_groundtruth(dataset=self.dataset)
-        groundtruth_item = gt.get("ground truth")
 
         # Retrieve one long-term memory trajectory as few-shot guidance for planning
         task_query = json.dumps(test_task, ensure_ascii=False)
@@ -164,7 +173,7 @@ class TestRecommendationAgent(RecommendationAgent):
             task_type="Recommendation Task",
             task_description=task_description,
             feedback="",
-            few_shot=few_shot,
+            few_shot="",
         )
         for step in plan:
             print(f"Step: {step['description']}")
@@ -210,6 +219,7 @@ class TestRecommendationAgent(RecommendationAgent):
             "task": test_task,
             "user_profile": user_profile,
             "item_profiles": item_profiles,
+            "plan": plan,
             "candidate_list": test_task["candidate_list"],
         }
         reasoning_prompt = (
@@ -255,15 +265,67 @@ class TestRecommendationAgent(RecommendationAgent):
         print("\n[Ranked list from reasoning]:")
         print(ranked_filtered)
 
-        # eval against groundtruth: check rank position
-        rank_pos = None
+        # ----- Pairwise Reranking on top-K candidates -----
+        user_id = test_task.get("user_id")
+        raw_user_info = self.interaction_tool.get_user(user_id=user_id)
+        user_reviews = self.interaction_tool.get_reviews(user_id=user_id)
+
+        clean_history = []
+        if isinstance(user_reviews, list):
+            for r in user_reviews[:10]:
+                clean_history.append(
+                    {
+                        "item_id": r.get("item_id"),
+                        "rating": r.get("stars", r.get("rating", "N/A")),
+                        "text": r.get("text", "")[:200],
+                    }
+                )
+
+        rich_user_profile = {
+            "basic_info": raw_user_info,
+            "history_reviews": clean_history,
+            "instruction": "Please infer user taste from history_reviews.",
+        }
+
+        # Fetch item profiles for top-K items (using raw item metadata)
+        top_k = 5
+        candidates_to_fetch = ranked_filtered[:top_k]
+        item_profiles_for_pairwise = []
+        for item_id in candidates_to_fetch:
+            info = self.interaction_tool.get_item(item_id=item_id)
+            if info:
+                info["item_id"] = item_id
+                item_profiles_for_pairwise.append(info)
+
+        pairwise_context = {
+            "user_profile": rich_user_profile,
+            "item_profiles": item_profiles_for_pairwise,
+        }
+
+        print(
+            f"[BaselineTest] Pairwise reranking on top {len(item_profiles_for_pairwise)} candidates..."
+        )
+        final_ranking = self.pairwise_ranker.rerank(ranked_filtered, pairwise_context)
+
+        print("\n[Ranked list after pairwise rerank]:")
+        print(final_ranking)
+
+        # eval against groundtruth: check rank position before and after pairwise
+        pre_rank_pos = None
         if groundtruth_item in ranked_filtered:
-            rank_pos = ranked_filtered.index(groundtruth_item) + 1  # 1-based
+            pre_rank_pos = ranked_filtered.index(groundtruth_item) + 1  # 1-based
+        pre_is_top5 = pre_rank_pos is not None and pre_rank_pos <= 5
+
+        rank_pos = None
+        if groundtruth_item in final_ranking:
+            rank_pos = final_ranking.index(groundtruth_item) + 1  # 1-based
         is_top5 = rank_pos is not None and rank_pos <= 5
 
         print("[Ground truth]:", groundtruth_item)
-        print("[Ground truth rank position]:", rank_pos)
-        print("[Is in top-5]:", is_top5)
+        print("[Ground truth rank BEFORE pairwise]:", pre_rank_pos)
+        print("[Is in top-5 BEFORE pairwise]:", pre_is_top5)
+        print("[Ground truth rank AFTER pairwise]:", rank_pos)
+        print("[Is in top-5 AFTER pairwise]:", is_top5)
 
         # Add Memory
         trajectory = (
@@ -274,17 +336,31 @@ class TestRecommendationAgent(RecommendationAgent):
             f"UserProfile:\n"
             f"    {json.dumps(user_profile, ensure_ascii=False)}\n\n"
             f"RankedList:\n"
-            f"    {ranked_filtered}\n\n"
+            f"    {final_ranking}\n\n"
             f"GroundTruth:\n"
             f"    {groundtruth_item}\n\n"
-            f"RankPos:\n"
+            f"RankPosBeforePairwise:\n"
+            f"    {pre_rank_pos}\n\n"
+            f"IsTop5BeforePairwise:\n"
+            f"    {pre_is_top5}\n\n"
+            f"RankPosAfterPairwise:\n"
             f"    {rank_pos}\n\n"
-            f"IsTop5:\n"
+            f"IsTop5AfterPairwise:\n"
             f"    {is_top5}\n"
         )
         print("\n[Trajectory]:", trajectory)
 
-        return ranked_filtered
+        # save summary for external aggregation
+        self.last_result_summary = {
+            "task_name": task_name if task_name is not None else "task_0",
+            "groundtruth_item": groundtruth_item,
+            "pre_rank_pos": pre_rank_pos,
+            "pre_is_top5": pre_is_top5,
+            "post_rank_pos": rank_pos,
+            "post_is_top5": is_top5,
+        }
+
+        return final_ranking
 
 
 if __name__ == "__main__":
@@ -294,7 +370,65 @@ if __name__ == "__main__":
     # llm_gemini = GeminiLLM(api_key=api_key_gemini, model="gemini-1.5-pro")
     # llm_openai = OpenAILLM(api_key=api_key_openai, model="gpt-4o")
     llm_google = GeminiLLM(api_key=api_key_google, model="gemini-2.5-flash")
-    print("\n===== TEST: Planning Module (Recommendation Voyager, Class Mode) =====\n")
-    agent = TestRecommendationAgent(llm_google, dataset="goodreads")
-    result = agent.workflow()
-    print("Final recommended list:", result)
+
+    dataset = "goodreads"
+    print(
+        "\n===== TEST: Planning Module (Recommendation Voyager, Baseline with Pairwise) =====\n"
+    )
+    agent = TestRecommendationAgent(llm_google, dataset=dataset)
+
+    # collect all tasks for this dataset
+    task_dir = f"./example/track2/{dataset}/tasks"
+    gt_dir = f"./example/track2/{dataset}/groundtruth"
+    task_files = sorted(
+        [
+            f
+            for f in os.listdir(task_dir)
+            if f.startswith("task_") and f.endswith(".json")
+        ],
+        key=lambda x: int(x.split("_")[1].split(".")[0]),
+    )
+    if not task_files:
+        raise FileNotFoundError(f"No task files found in {task_dir}")
+
+    # randomly sample a few tasks (no threading here, so keep small)
+    k = 5
+    seed = 42
+    random.seed(seed)
+    indices = random.sample(range(len(task_files)), k=min(k, len(task_files)))
+
+    summaries = []
+    for idx in indices:
+        task_file = task_files[idx]
+        task_index_str = task_file.split("_")[1].split(".")[0]
+        task_name = f"task_{task_index_str}"
+
+        task_path = os.path.join(task_dir, task_file)
+        with open(task_path, "r", encoding="utf-8") as f:
+            test_task = json.load(f)
+
+        gt_path = os.path.join(gt_dir, f"groundtruth_{task_index_str}.json")
+        with open(gt_path, "r", encoding="utf-8") as f:
+            gt = json.load(f)
+        groundtruth_item = gt.get("ground truth")
+
+        print(f"\n===== RUNNING {task_name} =====")
+        result = agent.workflow(
+            test_task=test_task,
+            groundtruth_item=groundtruth_item,
+            task_name=task_name,
+        )
+        print("Final recommended list:", result)
+
+        if agent.last_result_summary is not None:
+            summaries.append(agent.last_result_summary)
+
+    # print per-task ranks before/after pairwise
+    if summaries:
+        print("\n===== PER-TASK GROUNDTRUTH RANK (PRE / POST PAIRWISE) =====")
+        for s in summaries:
+            print(
+                f"{s['task_name']}: "
+                f"pre_rank={s['pre_rank_pos']}, pre_top5={s['pre_is_top5']}; "
+                f"post_rank={s['post_rank_pos']}, post_top5={s['post_is_top5']}"
+            )

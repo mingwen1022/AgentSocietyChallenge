@@ -116,7 +116,7 @@ class Track2TrainAgent(RecommendationAgent):
         self.memory_voyager = MemoryVoyager(llm, reset=False)
 
         # Reasoning module: rank candidate_list
-        self.reasoning = ReasoningSelfRefine(
+        self.reasoning = ReasoningIO(
             profile_type_prompt="You are an intelligent recommendation system.",
             memory=None,
             llm=self.llm,
@@ -141,8 +141,8 @@ class Track2TrainAgent(RecommendationAgent):
         - call planning
         - build profiles via InfoOrchestrator
         - run reasoning to rank candidate_list
-        - evaluate whether groundtruth is in the top-3
-        - write trajectory into memory ONLY if groundtruth is in top-3
+        - evaluate whether groundtruth is in the top-5
+        - write trajectory into memory ONLY if groundtruth is in top-5
         """
         print("\n===== TRAIN: Planning + Memory (single task) =====\n")
 
@@ -191,6 +191,7 @@ class Track2TrainAgent(RecommendationAgent):
         # 7) Reasoning: rank candidate_list
         reasoning_context = {
             "task": task,
+            "plan": plan,
             "user_profile": user_profile,
             "item_profiles": item_profiles,
             "candidate_list": task["candidate_list"],
