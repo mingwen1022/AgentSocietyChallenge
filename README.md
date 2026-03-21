@@ -1,225 +1,162 @@
-<div style="text-align: center; display: flex; align-items: center; justify-content: center; background-color: white; padding: 20px; border-radius: 30px;">
-  <img src="./static/ASC.jpg" alt="AgentSociety Challenge Logo" width="100" style="margin-right: 20px; border-radius: 10%;">
-  <h1 style="color: black; margin: 0; font-size: 2em;">WWW'25 AgentSociety Challenge: WebSocietySimulator</h1>
-</div>
+# Enhanced Goodreads Recommendation Multi-Agent System
 
-# 🚀 AgentSociety Challenge
-![License](https://img.shields.io/badge/license-MIT-green) &ensp;
-[![Competition Link](https://img.shields.io/badge/competition-link-orange)](https://www.codabench.org/competitions/4574/) &ensp;
+![License](https://img.shields.io/badge/license-MIT-green)
+[![Competition](https://img.shields.io/badge/WWW'25-AgentSociety_Challenge-blue)](https://github.com/tsinghua-fib-lab/AgentSocietyChallenge)
+[![Track](https://img.shields.io/badge/Track_2-Recommendation-orange)](https://tsinghua-fib-lab.github.io/AgentSocietyChallenge/pages/recommendation-track.html)
 [![arXiv](https://img.shields.io/badge/arXiv-2502.18754-b31b1b.svg)](https://arxiv.org/abs/2502.18754)
 
-Welcome to the **WWW'25 AgentSociety Challenge**! This repository provides the tools and framework needed to participate in a competition that focuses on building **LLM Agents** for **user behavior simulation** and **recommendation systems** based on open source datasets.
+**Team:** Shu Han Ho · Alexander Thaik · Ming Wen · Yu-Yun Chen
 
-Participants are tasked with developing intelligent agents that interact with a simulated environment and perform specific tasks in two competition tracks:
-1. **User Behavior Simulation Track**: Agents simulate user behavior, including generating reviews and ratings.
-2. **Recommendation Track**: Agents generate recommendations based on provided contextual data.
+---
 
-This repository includes:
-- The core library `websocietysimulator` for environment simulation.
-- Scripts for dataset processing and analysis.
-- Example usage for creating and evaluating agents.
+## Overview
+
+We built a multi-agent LLM recommendation system for the **WWW'25 AgentSociety Challenge (Track 2 — Recommendation)**, targeting the Goodreads dataset. Given a user and 20 candidate books, our system returns a ranked recommendation list.
+
+We extend the [AgentSociety Challenge framework](https://github.com/tsinghua-fib-lab/AgentSocietyChallenge) with four core innovations — **Dynamic Profile Generation**, **Permutation Evaluation Pipeline**, **Pairwise Reranking**, and **Long-Term Memory** — achieving significant improvements over the baseline across all Hit Rate metrics.
+
+---
+
+## Results
+
+| Configuration | HR@1 | HR@3 | HR@5 |
+|---|:---:|:---:|:---:|
+| Baseline | 0.00 | 0.24 | 0.42 |
+| **Ours (best)** | **0.26** | **0.54** | **0.60** |
+
+**Best configuration:** `PlanningVoyagerCustom` + `ReasoningIO` + `MemoryDILU` + Pairwise Reranking (MaxRev=70, FieldLen=50)
+
+---
+
+## System Architecture
+
+The pipeline follows four stages:
+
+1. **Planning** — LLM generates dataset-aware sub-task steps (Voyager/DEPS/IO planner variants)
+2. **Profile Generation** — `InfoOrchestrator` + `SchemaFitterIO` build structured user and item JSON profiles from raw review data
+3. **Memory Retrieval** — `MemoryDILU` fetches similar successful trajectories from an offline-trained vector store as few-shot examples
+4. **Reasoning + Reranking** — LLM ranks candidates; `PairwiseRanker` applies a King-of-the-Hill tournament to optimize HR@1
+
+---
+
+## Four Core Innovations
+
+### 1. Dynamic Profile Generation
+
+Instead of feeding raw text dumps to the LLM, the `InfoOrchestrator` module dynamically determines what attributes matter for each user (genre preference, reading style, theme, etc.) and builds a structured JSON schema via `SchemaFitterIO`. Candidate profiles are generated using the same user-specific schema — ensuring the LLM focuses on signal relevant to that individual user rather than generic metadata.
+
+**Key files:** `rec_agent_experiment/info_orchestrator_module.py`, `rec_agent_experiment/schemafitter_module.py`
+
+### 2. Permutation Evaluation Pipeline
+
+A systematic testing framework that cycles through 15+ workflow combinations (6 planning modules × 6 reasoning modules × 4 memory modules) on the same task set for fair comparison. Outputs hit rates, timing, and value-efficiency scores per configuration.
+
+**Key files:** `Ai_AGENT_SH_branch/example/enhanced_agent/workflow_mixins.py`, `rec_agent_experiment/test_recommendation_accuracy.py`
+
+### 3. Pairwise Reranking
+
+After initial pointwise ranking, the top-K=5 candidates are refined using a **King of the Hill** linear scan — each challenger is compared head-to-head against the current king with a "strict judge" Chain-of-Thought prompt. This reduces position bias and hallucinations at O(K) cost (4 LLM calls per task), directly optimizing HR@1.
+
+**Key files:** `pairwise_module_callingexample/pairwise_modules.py`
+
+### 4. Long-Term Memory
+
+An offline training script (`train_longterm_memory.py`) runs the full pipeline and stores successful trajectories (where the ground-truth item lands in top-5) into a `MemoryDILU` vector database (Chroma). At inference, the planner retrieves similar past trajectories as few-shot examples, grounding the LLM and reducing hallucinations.
+
+**Key files:** `rec_agent_experiment/train_longterm_memory.py`, `rec_agent_experiment/memory_modules_custom.py`
 
 ---
 
 ## Directory Structure
 
-### 1. **`websocietysimulator/`**  
-This is the core library containing all source code required for the competition.
-
-- **`agents/`**: Contains base agent classes (`SimulationAgent`, `RecommendationAgent`) and their abstractions. Participants must extend these classes for their implementations.
-- **`task/`**: Defines task structures for each track (`SimulationTask`, `RecommendationTask`).
-- **`llm/`**: Contains base LLM client classes (`DeepseekLLM`, `OpenAILLM`).
-- **`tools/`**: Includes utility tools:
-  - `InteractionTool`: A utility for interacting with the Yelp dataset during simulations.
-  - `EvaluationTool`: Provides comprehensive metrics for both recommendation (HR@1/3/5) and simulation tasks (RMSE, sentiment analysis).
-- **`simulator.py`**: The main simulation framework, which handles task and groundtruth setting, evaluation and agent execution.
-
-### 2. **`example/`**  
-Contains usage examples of the `websocietysimulator` library. Includes sample agents and scripts to demonstrate how to load scenarios, set agents, and evaluate them.
-
-### 3. **`data_process.py`**  
-A script to process the raw Yelp dataset into the required format for use with the `websocietysimulator` library. This script ensures the dataset is cleaned and structured correctly for simulations.
+```
+.
+├── websocietysimulator/          # Core simulation library (base framework)
+│   └── agents/modules/           # Planning, reasoning, memory base classes + custom variants
+├── rec_agent_experiment/         # Our custom modules and training scripts
+│   ├── info_orchestrator_module.py
+│   ├── schemafitter_module.py
+│   ├── memory_modules_custom.py
+│   ├── train_longterm_memory.py
+│   └── memory_train/             # Stored successful trajectories
+├── Ai_AGENT_SH_branch/           # Enhanced modular agent framework
+│   └── example/enhanced_agent/   # WorkflowMixin, EnhancedRecommendationAgent, base_agent.py
+├── pairwise_module_callingexample/  # Pairwise reranking implementation
+├── example/                      # Baseline agents for comparison
+├── evaluation_result/            # JSON results from all experiment runs
+├── GTsimulation/                 # Game-theory based agent variants
+├── data_images/                  # Visualizations and workflow diagrams
+├── docs/                         # Competition documentation site
+├── tutorials/                    # Setup and usage guides
+├── data_process.py               # Dataset preparation script
+└── requirements.txt
+```
 
 ---
 
 ## Quick Start
 
-### 1. Install the Library
+### 1. Install dependencies
 
-The repository is organized using [Python Poetry](https://python-poetry.org/). Follow these steps to install the library:
+```bash
+git clone https://github.com/mingwen1022/AgentSocietyChallenge.git
+cd AgentSocietyChallenge
 
-1. Clone the repository:
-   ```bash
-   git clone <this_repo>
-   cd websocietysimulator
-   ```
+# Recommended: Poetry
+poetry install && poetry shell
 
-2. Install dependencies:
-  - Option 1: Install dependencies using Poetry: (Recommended)
-    ```bash
-    poetry install  && \
-    poetry shell
-    ```
-  - Option 2: Install dependencies using pip(COMING SOON):
-    ```bash
-    pip install websocietysimulator
-    ```
-  - Option 3: Install dependencies using conda:
-    ```bash
-    conda create -n websocietysimulator python=3.11 && \
-    conda activate websocietysimulator && \
-    pip install -r requirements.txt && \
-    pip install .
-    ```
-
-3. Verify the installation:
-   ```python
-   import websocietysimulator
-   ```
-
----
-
-### 2. Data Preparation
-
-1. Download the raw dataset from the Yelp[1], Amazon[2] or Goodreads[3].
-2. Run the `data_process.py` script to process the dataset:
-   ```bash
-   python data_process.py --input <path_to_raw_dataset> --output <path_to_processed_dataset>
-   ```
-- Check out the [Data Preparation Guide](./tutorials/data_preparation.md) for more information.
-- **NOTICE: You Need at least 16GB RAM to process the dataset.**
-
----
-
-### 3. Organize Your Data
-
-Ensure the dataset is organized in a directory structure similar to this:
-
+# Alternative: pip
+pip install -r requirements.txt && pip install .
 ```
-<your_dataset_directory>/
+
+### 2. Prepare data
+
+Download the [Goodreads dataset](https://sites.google.com/eng.ucsd.edu/ucsdbookgraph/home) and process it:
+
+```bash
+python data_process.py --input <path_to_raw_dataset> --output <path_to_processed_dataset>
+```
+
+Organize into:
+```
+<dataset_dir>/
 ├── item.json
 ├── review.json
-├── user.json
+└── user.json
 ```
 
-You can name the dataset directory whatever you prefer (e.g., `dataset/`).
+### 3. Configure API key
 
----
+Create a `.env` file and add your OpenAI or DeepSeek API key.
 
-### 4. Develop Your Agent
-
-Create a custom agent by extending either `SimulationAgent` or `RecommendationAgent`. Refer to the examples in the `example/` directory. Here's a quick template:
-
-```python
-from yelpsimulator.agents.simulation_agent import SimulationAgent
-
-class MySimulationAgent(SimulationAgent):
-    def workflow(self):
-        # The simulator will automatically set the task for your agent. You can access the task by `self.task` to get task information.
-        print(self.task)
-
-        # You can also use the `interaction_tool` to get data from the dataset.
-        # For example, you can get the user information by `interaction_tool.get_user(user_id="example_user_id")`.
-        # You can also get the item information by `interaction_tool.get_item(item_id="example_item_id")`.
-        # You can also get the reviews by `interaction_tool.get_reviews(review_id="example_review_id")`.
-        user_info = interaction_tool.get_user(user_id="example_user_id")
-
-        # Implement your logic here
-        
-        # Finally, you need to return the result in the format of `stars` and `review`.
-        # For recommendation track, you need to return a candidate list of items, in which the first item is the most recommended item.
-        stars = 4.0
-        review = "Great experience!"
-        return stars, review
-```
-
-- Check out the [Tutorial](./tutorials/agent_development.md) for Agent Development.
-- Baseline User Behavior Simulation Agent: [Baseline User Behavior Simulation Agent](./example/ModelingAgent_baseline.py).
-- Baseline Recommendation Agent: [Baseline Recommendation Agent](./example/RecAgent_baseline.py).
----
-
-### 5. Evaluation your agent with training data
-
-Run the simulation using the provided `Simulator` class:
+### 4. Run the recommendation agent
 
 ```python
 from websocietysimulator import Simulator
-from my_agent import MySimulationAgent
+from websocietysimulator.llm import DeepseekLLM
 
-# Initialize Simulator
-simulator = Simulator(data_dir="path/to/your/dataset", device="auto", cache=False)
-# The cache parameter controls whether to use cache for interaction tool.
-# If you want to use cache, you can set cache=True. When using cache, the simulator will only load data into memory when it is needed, which saves a lot of memory.
-# If you want to use normal interaction tool, you can set cache=False. Notice that, normal interaction tool will load all data into memory at the beginning, which needs a lot of memory (20GB+).
+simulator = Simulator(data_dir="path/to/dataset", device="auto", cache=True)
+simulator.set_task_and_groundtruth(task_dir="path/to/tasks", groundtruth_dir="path/to/groundtruth")
+simulator.set_agent(YourCustomAgent)
+simulator.set_llm(DeepseekLLM(api_key="YOUR_API_KEY"))
 
-# Load scenarios
-simulator.set_task_and_groundtruth(task_dir="path/to/task_directory", groundtruth_dir="path/to/groundtruth_directory")
-
-# Set your custom agent
-simulator.set_agent(MySimulationAgent)
-
-# Set LLM client
-simulator.set_llm(DeepseekLLM(api_key="Your API Key"))
-
-# Run evaluation
-# If you don't set the number of tasks, the simulator will run all tasks.
-agent_outputs = simulator.run_simulation(number_of_tasks=None, enable_threading=True, max_workers=10)
-
-# Evaluate the agent
+agent_outputs = simulator.run_simulation(number_of_tasks=50, enable_threading=True, max_workers=10)
 evaluation_results = simulator.evaluate()
+print(evaluation_results)
 ```
-- If you want to use your own LLMClient, you can easily implement it by inheriting the `LLMBase` class. Refer to the [Tutorial](./tutorials/agent_development.md) for more information.
 
 ---
 
-### 6. Submit your agent
-- You should register your team firstly in the competition homepage ([Homepage](https://tsinghua-fib-lab.github.io/AgentSocietyChallenge)).
-- Submit your solution through the submission button at the specific track page. (the submission button is at the top right corner of the page)
-  - [User Modeling Track](https://tsinghua-fib-lab.github.io/AgentSocietyChallenge/pages/behavior-track.html)
-  - [Recommendation Track](https://tsinghua-fib-lab.github.io/AgentSocietyChallenge/pages/recommendation-track.html)
-  - Please register your team first.
-  - When you submit your agent, please carefully **SELECT the TRACK you want to submit to.**
-- **The content of your submission should be a .py file containing your agent (Only one `{your_team}.py` file without evaluation code).**
-- Example submissions:
-  - For Track 1: [submission_1](example/trackOneSubmission_example.zip)
-  - For Track 2: [submission_2](example/trackTwoSubmission_example.zip)
+## Credits
+
+This project is built on top of the **WWW'25 AgentSociety Challenge** framework by Tsinghua FIB Lab:
+
+> **AgentSociety Challenge: Designing LLM Agents for User Behavior Simulation and Recommendation**
+> [https://github.com/tsinghua-fib-lab/AgentSocietyChallenge](https://github.com/tsinghua-fib-lab/AgentSocietyChallenge)
+> arXiv: [2502.18754](https://arxiv.org/abs/2502.18754)
 
 ---
-
-## Introduction to the `InteractionTool`
-
-The `InteractionTool` is the core utility for interacting with the dataset. It provides an interface for querying user, item, and review data.
-
-### Functions
-
-- **Get User Information**:
-  Retrieve user data by user ID or current scenario context.
-  ```python
-  user_info = interaction_tool.get_user(user_id="example_user_id")
-  ```
-
-- **Get Item Information**:
-  Retrieve item data by item ID or current scenario context.
-  ```python
-  item_info = interaction_tool.get_item(item_id="example_item_id")
-  ```
-
-- **Get Reviews**:
-  Fetch reviews related to a specific item or user, filtered by time.
-  ```python
-  reviews = interaction_tool.get_reviews(review_id="example_review_id")  # Fetch a specific review
-  reviews = interaction_tool.get_reviews(item_id="example_item_id")  # Fetch all reviews for a specific item
-  reviews = interaction_tool.get_reviews(user_id="example_user_id")  # Fetch all reviews for a specific user
-  ```
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
-## References
-
-[1] Yelp Dataset: https://www.yelp.com/dataset
-
-[2] Amazon Dataset: https://amazon-reviews-2023.github.io/
-
-[3] Goodreads Dataset: https://sites.google.com/eng.ucsd.edu/ucsdbookgraph/home
+MIT License. See [LICENSE](./LICENSE) for details.
